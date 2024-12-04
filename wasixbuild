@@ -1,0 +1,100 @@
+#!/bin/sh
+
+jq_ver=1.7.1
+
+usage () {
+cat <<'EOT'
+This script is derived from the wasix test code builder.
+It can be called in 3 ways.
+
+1. Clean and build AWK with the supplied makefile,
+   then rename the resulting a.out to awk.wasm.
+     ./wasixbuild
+
+2. Issue explicit build commands, essentially executing
+   CC CFLAGS LDFLAGS $@
+     ./wasixbuild -c b.c
+
+3. Issue explicit make commands
+   ./wasixbuild make -f makefile cleaner
+EOT
+}
+
+if [ "$1" = -h ] || [ "$1" = --help ] || [ "$1" = help ]; then
+  usage
+  exit
+fi
+
+if [ -z "${WASI_SDK}" ]; then
+    echo "WASI_SDK is not found"
+    exit 1
+fi
+
+if [ -z "${WASIX_SYSROOT}" ]; then
+    echo "WASIX_SYSROOT is not found"
+    exit 1
+fi
+
+export RANLIB="$WASI_SDK/bin/ranlib"
+export AR="$WASI_SDK/bin/ar"
+export NM="$WASI_SDK/bin/nm"
+export CC="$WASI_SDK/bin/clang"
+export CXX="$WASI_SDK/bin/clang"
+export CFLAGS="\
+--sysroot=$WASIX_SYSROOT \
+-matomics \
+-mbulk-memory \
+-mmutable-globals \
+-pthread \
+-mthread-model posix \
+-ftls-model=local-exec \
+-fno-trapping-math \
+-D_WASI_EMULATED_MMAN \
+-D_WASI_EMULATED_SIGNAL \
+-D_WASI_EMULATED_PROCESS_CLOCKS \
+-O2 \
+-g \
+-flto"
+export CFLAGSS="$CFLAGS"
+#export LD="$WASI_SDK/bin/wasm-ld"
+export LD="$CC"
+export LDFLAGS="\
+-Wl,--shared-memory \
+-Wl,--max-memory=4294967296 \
+-Wl,--import-memory \
+-Wl,--export-dynamic \
+-Wl,--export=__heap_base \
+-Wl,--export=__stack_pointer \
+-Wl,--export=__data_end \
+-Wl,--export=__wasm_init_tls \
+-Wl,--export=__tls_size \
+-Wl,--export=__tls_align \
+-Wl,--export=__tls_base \
+-Wl,--export=__wasm_signal \
+-lwasi-emulated-mman \
+-O3 \
+-g \
+-flto"
+
+if [ ! -f "jq-$jq_ver.tar.gz" ]; then
+  if ! curl -OL "https://github.com/jqlang/jq/releases/download/jq-$jq_ver/jq-$jq_ver.tar.gz"; then
+    echo "Could not download jq. CURL failed with exit code $?"
+    echo "https://github.com/jqlang/jq/releases/download/jq-$jq_ver/jq-$jq_ver.tar.gz"
+    exit 1
+  fi
+fi
+
+if [ ! -d "jq-$jq_ver.tar.gz" ]; then
+  if ! tar xf jq-$jq_ver.tar.gz; then
+    echo "tar failed to extract jq-$jq_ver.tar.gz with exit code $?"
+    exit 1
+  fi
+fi
+
+cd jq-$jq_ver
+./configure --host wasm32-wasi
+make
+
+if [ -f jq ]; then
+  mv jq ../jq.wasm
+fi
